@@ -1,6 +1,6 @@
 name: Sync Tags
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
 
 jobs:
   sync:
