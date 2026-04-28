@@ -46,6 +46,23 @@ function splitURIFragment(raw) {
     };
 }
 
+function decodeShadowsocksUserInfo(rawUserInfoStr) {
+    const separatorIndex = rawUserInfoStr.indexOf(':');
+    if (separatorIndex !== -1) {
+        return [
+            decodeURIComponent(rawUserInfoStr.slice(0, separatorIndex)),
+            decodeURIComponent(rawUserInfoStr.slice(separatorIndex + 1)),
+        ].join(':');
+    }
+
+    const decodedUserInfoStr = decodeURIComponent(rawUserInfoStr);
+    if (decodedUserInfoStr.includes(':')) {
+        return decodedUserInfoStr;
+    }
+
+    return Base64.decode(decodedUserInfoStr);
+}
+
 function parseWireGuardURIAddressValue(value) {
     if (value == null) return null;
     const raw = `${value}`.trim();
@@ -182,13 +199,7 @@ function URI_SS() {
         // handle IPV4 and IPV6
         let serverAndPortArray = content.match(/@([^/?]*)(\/|\?|$)/);
 
-        let rawUserInfoStr = decodeURIComponent(content.split('@')[0]); // 其实应该分隔之后, 用户名和密码再 decodeURIComponent. 但是问题不大
-        let userInfoStr;
-        if (rawUserInfoStr?.startsWith('2022-blake3-')) {
-            userInfoStr = rawUserInfoStr;
-        } else {
-            userInfoStr = Base64.decode(rawUserInfoStr);
-        }
+        let userInfoStr = decodeShadowsocksUserInfo(content.split('@')[0]);
 
         let query = '';
         if (!serverAndPortArray) {
@@ -1036,9 +1047,20 @@ function URI_VLESS() {
                 );
             }
 
+            if (
+                Object.prototype.hasOwnProperty.call(xhttpSettings, 'mode') &&
+                !isNotBlank(xhttpSettings.mode)
+            ) {
+                setUnsupportedXhttpField(
+                    unsupportedXhttpSettings,
+                    'mode',
+                    xhttpSettings.mode,
+                );
+            }
+
             const inlineExtra = {};
             for (const [key, value] of Object.entries(xhttpSettings)) {
-                if (['path', 'host', 'extra'].includes(key)) {
+                if (['path', 'host', 'mode', 'extra'].includes(key)) {
                     continue;
                 }
                 inlineExtra[key] = value;
@@ -1098,7 +1120,9 @@ function URI_VLESS() {
                         break;
                     case 'security': {
                         const normalizedSecurity =
-                            typeof value === 'string' ? value.toLowerCase() : '';
+                            typeof value === 'string'
+                                ? value.toLowerCase()
+                                : '';
                         if (!['tls', 'reality'].includes(normalizedSecurity)) {
                             setUnsupportedXhttpField(
                                 unsupportedDownloadSettings,
@@ -1119,7 +1143,9 @@ function URI_VLESS() {
                         }
 
                         const unsupportedTlsSettings = {};
-                        for (const [tlsKey, tlsValue] of Object.entries(value)) {
+                        for (const [tlsKey, tlsValue] of Object.entries(
+                            value,
+                        )) {
                             switch (tlsKey) {
                                 case 'serverName':
                                 case 'fingerprint':
@@ -1238,7 +1264,9 @@ function URI_VLESS() {
                     }
                     case 'network': {
                         const normalizedNetwork =
-                            typeof value === 'string' ? value.toLowerCase() : '';
+                            typeof value === 'string'
+                                ? value.toLowerCase()
+                                : '';
                         if (
                             normalizedNetwork !== 'xhttp' &&
                             normalizedNetwork !== 'splithttp'
@@ -1501,6 +1529,10 @@ function URI_VLESS() {
                     parsedDownloadSettings.host =
                         downloadSettings.xhttpSettings.host;
                 }
+                if (isNotBlank(downloadSettings.xhttpSettings.mode)) {
+                    parsedDownloadSettings.mode =
+                        downloadSettings.xhttpSettings.mode;
+                }
                 applyXhttpExtraFields(
                     parsedDownloadSettings,
                     downloadSettings.xhttpSettings,
@@ -1651,6 +1683,13 @@ function URI_VLESS() {
                 } else {
                     opts.headers = { Host: host };
                 }
+                if (['xhttp'].includes(proxy.network) && opts.headers?.Host) {
+                    opts.host = opts.headers.Host;
+                    delete opts.headers.Host;
+                    if (Object.keys(opts.headers).length === 0) {
+                        delete opts.headers;
+                    }
+                }
             }
             if (params.serviceName) {
                 opts[`${proxy.network}-service-name`] = params.serviceName;
@@ -1753,9 +1792,12 @@ function URI_VLESS() {
                 // Supported fields must round-trip through the structured node
                 // so later edits are reflected on export, while unsupported
                 // fields still survive VLESS URI -> node -> VLESS URI flows.
-                const unsupportedExtra = collectUnsupportedRootXhttpExtra(extra, {
-                    parsedDownloadSettings: downloadSettings,
-                });
+                const unsupportedExtra = collectUnsupportedRootXhttpExtra(
+                    extra,
+                    {
+                        parsedDownloadSettings: downloadSettings,
+                    },
+                );
                 if (unsupportedExtra) {
                     proxy._extra_unsupported = unsupportedExtra;
                 }
